@@ -1,0 +1,43 @@
+name: CI Security Pipeline
+on:
+  push:
+    branches: [ main ]
+jobs:
+  sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+  sca_trivy:
+    runs-on: ubuntu-latest
+    needs: sast
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scanners: 'vuln'
+          format: 'table'
+          output: 'trivy_deps_report.txt'
+  dast_zap:
+    runs-on: ubuntu-latest
+    needs: sca_trivy
+    steps:
+      - name: Start Juice Shop
+        run: |
+          docker run -d --name juice-shop -p 3000:3000 bkimminich/juice-shop
+          sleep 30
+      - name: Run ZAP Baseline Scan
+        run: |
+          docker run --rm --network host \
+            -v ${{ github.workspace }}:/zap/wrk \
+            owasp/zap2docker-stable zap-baseline.py \
+            -t http://localhost:3000 \
+            -r zap_baseline_report.html \
+            -x zap_report.xml \
+            -I
